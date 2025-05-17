@@ -15,6 +15,7 @@ interface VideoPlayerProps {
 }
 
 export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -36,7 +37,8 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    const container = containerRef.current;
+    if (!video || !container) return;
 
     // Handle fullscreen changes
     const handleFullscreenChange = () => {
@@ -45,10 +47,12 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       setShowControls(true);
       
       if (!isFullscreen) {
-        // Reset control visibility and ensure video is properly sized
-        video.style.display = 'block';
+        // Reset container styles
+        container.style.width = '100%';
+        container.style.height = 'auto';
+        // Reset video styles
         video.style.width = '100%';
-        video.style.height = 'auto';
+        video.style.height = '100%';
         clearTimeout(controlsTimeoutRef.current);
       }
     };
@@ -137,9 +141,9 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       }
     };
 
-    video.addEventListener('mousemove', handleMouseMove);
-    video.addEventListener('mouseenter', () => setShowControls(true));
-    video.addEventListener('mouseleave', () => {
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseenter', () => setShowControls(true));
+    container.addEventListener('mouseleave', () => {
       if (isPlaying && !showSettings && !showKeyboardShortcuts) {
         setShowControls(false);
       }
@@ -151,7 +155,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('playing', handlePlaying);
-      video.removeEventListener('mousemove', handleMouseMove);
+      container.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('keydown', handleKeyPress);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       clearTimeout(controlsTimeoutRef.current);
@@ -180,12 +184,12 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
   };
 
   const toggleFullscreen = async () => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     try {
       if (!document.fullscreenElement) {
-        await video.requestFullscreen();
+        await container.requestFullscreen();
         setIsFullscreen(true);
         setShowControls(true);
       } else {
@@ -263,7 +267,10 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
   };
 
   return (
-    <div className="relative group aspect-video bg-black rounded-xl overflow-hidden">
+    <div 
+      ref={containerRef}
+      className="relative group aspect-video bg-black rounded-xl overflow-hidden"
+    >
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
           <div className="w-12 h-12 border-4 border-accent-500/30 border-t-accent-500 rounded-full animate-spin" />
@@ -274,7 +281,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
         ref={videoRef}
         src={src}
         poster={poster}
-        className="w-full h-full"
+        className="w-full h-full object-contain"
         playsInline
       />
 
