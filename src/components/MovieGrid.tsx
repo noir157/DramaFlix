@@ -24,7 +24,7 @@ export function MovieGrid({ movies, onSelect }: MovieGridProps) {
   };
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+    <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 lg:gap-4">
       {movies.map(movie => (
         <div
           key={movie.id}
@@ -38,11 +38,11 @@ export function MovieGrid({ movies, onSelect }: MovieGridProps) {
             loading="lazy"
           />
           
-          <div className="absolute inset-0 movie-card-overlay opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+          <div className="absolute inset-0 movie-card-overlay opacity-0 transition-opacity duration-500 group-hover:opacity-100 sm:group-hover:opacity-100 opacity-100 sm:opacity-0" />
           
-          <div className="absolute inset-0 flex flex-col justify-end p-4 translate-y-[70%] transition-transform duration-500 ease-out group-hover:translate-y-0">
-            <div className="mb-3">
-              <div className="flex items-center gap-2 text-xs font-medium text-neutral-400 mb-2">
+          <div className="absolute inset-0 flex flex-col justify-end p-3 lg:p-4 translate-y-0 sm:translate-y-[70%] transition-transform duration-500 ease-out group-hover:translate-y-0">
+            <div className="mb-2 lg:mb-3">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-neutral-400 mb-2">
                 {formatDuration(movie.duration) && (
                   <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-full">
                     <Clock size={12} />
@@ -62,12 +62,12 @@ export function MovieGrid({ movies, onSelect }: MovieGridProps) {
                 )}
               </div>
               
-              <h2 className="text-sm font-semibold tracking-tight text-white mb-2 line-clamp-2">
+              <h2 className="text-sm font-semibold tracking-tight text-white mb-1.5 lg:mb-2 line-clamp-2">
                 {movie.title}
               </h2>
               
-              <p className="text-xs leading-relaxed text-neutral-300 line-clamp-2">
-                {movie.description || 'No description available'}
+              <p className="text-xs leading-relaxed text-neutral-300 line-clamp-2 hidden sm:block">
+                {movie.description || 'Sem descrição disponível'}
               </p>
             </div>
             

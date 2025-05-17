@@ -4,17 +4,13 @@
 
 @layer base {
   :root {
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(26, 28, 37, 0.8);
   }
 
   body {
-    @apply bg-[#030014] text-neutral-100 antialiased selection:bg-accent-500/20 selection:text-accent-400;
+    @apply bg-[#0A0B0F] text-white antialiased selection:bg-blue-500/20 selection:text-blue-400;
     font-family: 'Inter', sans-serif;
-    background-image: 
-      radial-gradient(circle at top right, rgba(121, 40, 202, 0.15), transparent 25%),
-      radial-gradient(circle at bottom left, rgba(76, 0, 255, 0.15), transparent 25%);
-    background-attachment: fixed;
   }
 
   ::-webkit-scrollbar {
@@ -22,11 +18,11 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-black/20;
+    @apply bg-[#1A1C25];
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-accent-500/20 rounded-full hover:bg-accent-500/40 transition-colors;
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
   }
 }
 
@@ -53,26 +49,9 @@
 .movie-card-overlay {
   background: linear-gradient(
     to top,
-    rgb(3 0 20 / 0.95) 0%,
-    rgb(3 0 20 / 0.8) 40%,
-    rgb(3 0 20 / 0.4) 60%,
+    rgb(10 11 15 / 0.95) 0%,
+    rgb(10 11 15 / 0.8) 40%,
+    rgb(10 11 15 / 0.4) 60%,
     transparent 100%
   );
-}
-
-.glass-effect {
-  @apply backdrop-blur-xl bg-white/[0.02] border border-white/[0.08];
-}
-
-.glass-panel {
-  @apply backdrop-blur-xl bg-black/20 border border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.37)];
-}
-
-.scrollbar-hidden::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-hidden {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
 }

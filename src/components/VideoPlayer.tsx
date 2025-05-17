@@ -40,17 +40,14 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     const container = containerRef.current;
     if (!video || !container) return;
 
-    // Handle fullscreen changes
     const handleFullscreenChange = () => {
       const isFullscreen = !!document.fullscreenElement;
       setIsFullscreen(isFullscreen);
       setShowControls(true);
       
       if (!isFullscreen) {
-        // Reset container styles
         container.style.width = '100%';
         container.style.height = 'auto';
-        // Reset video styles
         video.style.width = '100%';
         video.style.height = '100%';
         clearTimeout(controlsTimeoutRef.current);
@@ -59,13 +56,11 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
-    // Restore watch progress
     const savedProgress = watchProgress[movieId];
     if (savedProgress) {
       video.currentTime = savedProgress;
     }
 
-    // Save progress periodically
     const interval = setInterval(() => {
       if (video.currentTime > 0) {
         updateWatchProgress(movieId, video.currentTime);
@@ -92,7 +87,6 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('playing', handlePlaying);
 
-    // Keyboard shortcuts
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       
@@ -130,7 +124,6 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
 
     document.addEventListener('keydown', handleKeyPress);
 
-    // Auto-hide controls
     const handleMouseMove = () => {
       setShowControls(true);
       clearTimeout(controlsTimeoutRef.current);
@@ -149,6 +142,80 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       }
     });
 
+    // Handle touch events for mobile
+    let touchStartTime = 0;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isSeeking = false;
+    let initialVolume = video.volume;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartTime = Date.now();
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      initialVolume = video.volume;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isSeeking) return;
+
+      const deltaX = e.touches[0].clientX - touchStartX;
+      const deltaY = e.touches[0].clientY - touchStartY;
+
+      // Horizontal swipe for seeking
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        const seekAmount = (deltaX / container.clientWidth) * video.duration;
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekAmount));
+        touchStartX = e.touches[0].clientX;
+      }
+      // Vertical swipe for volume
+      else {
+        const volumeChange = deltaY / container.clientHeight;
+        const newVolume = Math.max(0, Math.min(1, initialVolume - volumeChange));
+        video.volume = newVolume;
+        setVolume(newVolume);
+        setIsMuted(newVolume === 0);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const touchDuration = Date.now() - touchStartTime;
+      
+      // Single tap to toggle controls
+      if (touchDuration < 250 && !isSeeking) {
+        setShowControls(!showControls);
+      }
+      
+      isSeeking = false;
+    };
+
+    // Double tap to seek
+    let lastTap = 0;
+    const handleDoubleTap = (e: TouchEvent) => {
+      const currentTime = Date.now();
+      const tapLength = currentTime - lastTap;
+      
+      if (tapLength < 300) {
+        const rect = container.getBoundingClientRect();
+        const x = e.touches[0].clientX - rect.left;
+        
+        if (x < rect.width / 2) {
+          video.currentTime -= 10;
+        } else {
+          video.currentTime += 10;
+        }
+        
+        e.preventDefault();
+      }
+      
+      lastTap = currentTime;
+    };
+
+    container.addEventListener('touchstart', handleTouchStart);
+    container.addEventListener('touchmove', handleTouchMove);
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchstart', handleDoubleTap);
+
     return () => {
       clearInterval(interval);
       video.removeEventListener('timeupdate', handleTimeUpdate);
@@ -158,6 +225,10 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       container.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('keydown', handleKeyPress);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchstart', handleDoubleTap);
       clearTimeout(controlsTimeoutRef.current);
     };
   }, [movieId, updateWatchProgress, isPlaying, playbackSpeed, showSettings, showKeyboardShortcuts]);
@@ -301,7 +372,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
           {/* Progress bar */}
           <div
             ref={progressRef}
-            className="relative h-1 bg-white/30 rounded-full cursor-pointer group/progress"
+            className="relative h-1.5 bg-white/30 rounded-full cursor-pointer group/progress touch-none"
             onClick={handleProgressClick}
           >
             <div
@@ -309,12 +380,12 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
               style={{ width: `${(currentTime / duration) * 100}%` }}
             />
             <div
-              className="absolute h-3 w-3 bg-accent-500 rounded-full -translate-y-1 opacity-0 group-hover/progress:opacity-100 transition-opacity"
-              style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translateX(-50%) translateY(-25%)' }}
+              className="absolute h-4 w-4 bg-accent-500 rounded-full -translate-y-1/2 opacity-0 group-hover/progress:opacity-100 transition-opacity"
+              style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translateX(-50%)' }}
             />
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {/* Play/Pause button */}
             <button
               onClick={togglePlay}
@@ -332,7 +403,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
               onClick={() => {
                 if (videoRef.current) videoRef.current.currentTime -= 10;
               }}
-              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+              className="p-2 hover:bg-white/20 rounded-full transition-colors hidden sm:block"
             >
               <Rewind className="w-5 h-5" />
             </button>
@@ -342,13 +413,13 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
               onClick={() => {
                 if (videoRef.current) videoRef.current.currentTime += 10;
               }}
-              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+              className="p-2 hover:bg-white/20 rounded-full transition-colors hidden sm:block"
             >
               <SkipForward className="w-5 h-5" />
             </button>
 
             {/* Volume controls */}
-            <div className="relative group/volume">
+            <div className="relative group/volume hidden sm:block">
               <button
                 onClick={toggleMute}
                 onMouseEnter={() => setShowVolumeSlider(true)}
@@ -414,7 +485,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
             {/* Keyboard shortcuts */}
             <button
               onClick={() => setShowKeyboardShortcuts(!showKeyboardShortcuts)}
-              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+              className="p-2 hover:bg-white/20 rounded-full transition-colors hidden sm:block"
             >
               <Keyboard className="w-5 h-5" />
             </button>
@@ -422,7 +493,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
             {/* Picture in Picture */}
             <button
               onClick={togglePictureInPicture}
-              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+              className="p-2 hover:bg-white/20 rounded-full transition-colors hidden sm:block"
             >
               <PictureInPicture className="w-5 h-5" />
             </button>
@@ -474,6 +545,14 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
           </div>
         </div>
       )}
+
+      {/* Mobile touch gestures hint */}
+      <div className="absolute top-4 left-4 right-4 flex items-center justify-center pointer-events-none sm:hidden">
+        <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-center">
+          <p>Double tap sides to seek ±10s</p>
+          <p className="text-xs text-neutral-400">Swipe horizontally to seek, vertically for volume</p>
+        </div>
+      </div>
     </div>
   );
 }
