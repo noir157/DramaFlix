@@ -38,6 +38,23 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     const video = videoRef.current;
     if (!video) return;
 
+    // Handle fullscreen changes
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isFullscreen);
+      setShowControls(true);
+      
+      if (!isFullscreen) {
+        // Reset control visibility and ensure video is properly sized
+        video.style.display = 'block';
+        video.style.width = '100%';
+        video.style.height = 'auto';
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
     // Restore watch progress
     const savedProgress = watchProgress[movieId];
     if (savedProgress) {
@@ -113,7 +130,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     const handleMouseMove = () => {
       setShowControls(true);
       clearTimeout(controlsTimeoutRef.current);
-      if (isPlaying) {
+      if (isPlaying && !showSettings && !showKeyboardShortcuts) {
         controlsTimeoutRef.current = window.setTimeout(() => {
           setShowControls(false);
         }, 3000);
@@ -122,7 +139,11 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
 
     video.addEventListener('mousemove', handleMouseMove);
     video.addEventListener('mouseenter', () => setShowControls(true));
-    video.addEventListener('mouseleave', () => isPlaying && setShowControls(false));
+    video.addEventListener('mouseleave', () => {
+      if (isPlaying && !showSettings && !showKeyboardShortcuts) {
+        setShowControls(false);
+      }
+    });
 
     return () => {
       clearInterval(interval);
@@ -132,9 +153,10 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('keydown', handleKeyPress);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
       clearTimeout(controlsTimeoutRef.current);
     };
-  }, [movieId, updateWatchProgress, isPlaying, playbackSpeed]);
+  }, [movieId, updateWatchProgress, isPlaying, playbackSpeed, showSettings, showKeyboardShortcuts]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -157,16 +179,22 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     setIsMuted(video.muted);
   };
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
     const video = videoRef.current;
     if (!video) return;
 
-    if (!document.fullscreenElement) {
-      video.requestFullscreen();
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
+    try {
+      if (!document.fullscreenElement) {
+        await video.requestFullscreen();
+        setIsFullscreen(true);
+        setShowControls(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+        setShowControls(true);
+      }
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
     }
   };
 
