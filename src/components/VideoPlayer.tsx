@@ -1,11 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
-import {
-  Play, Pause, Volume2, VolumeX, Volume1, Volume,
-  Maximize, Minimize, SkipForward, Settings,
-  Subtitles, Keyboard, PictureInPicture, Rewind,
-  X, ChevronRight
-} from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Volume1, Volume, Maximize, Minimize, SkipForward, Settings, Subtitles, Keyboard, PictureInPicture, Rewind, X, ChevronRight, AlertCircle, RefreshCw, BugOff as Buffer } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import Hls from 'hls.js';
 
 interface VideoPlayerProps {
   src: string;
@@ -18,6 +14,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -29,11 +26,175 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
   const [showSettings, setShowSettings] = useState(false);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [quality, setQuality] = useState<string>('auto');
+  const [error, setError] = useState<string | null>(null);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [isBuffering, setIsBuffering] = useState(false);
   const controlsTimeoutRef = useRef<number>();
+  const lastPlaybackTime = useRef<number>(0);
+  const bufferCheckInterval = useRef<number>();
   
   const { videoSettings, watchProgress, updateWatchProgress, setVideoSettings } = useStore();
+
+  const initPlayer = async () => {
+    const video = videoRef.current;
+    if (!video || !src) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Check if the video URL is accessible
+      const response = await fetch(src, { method: 'HEAD' });
+      if (!response.ok) {
+        throw new Error('Video source is not accessible');
+      }
+
+      // Initialize HLS if supported and it's an HLS stream
+      if (Hls.isSupported() && src.includes('.m3u8')) {
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+        }
+
+        const hls = new Hls({
+          maxBufferLength: 30,
+          maxMaxBufferLength: 600,
+          maxBufferSize: 60 * 1000 * 1000,
+          maxBufferHole: 0.5,
+          lowLatencyMode: true,
+          backBufferLength: 90
+        });
+
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          hls.loadSource(src);
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setIsLoading(false);
+          if (videoSettings.autoplay) {
+            video.play().catch(() => {
+              setIsPlaying(false);
+              setError('Falha ao iniciar a reprodução automática');
+            });
+          }
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                setError('Erro ao carregar o vídeo');
+                setIsLoading(false);
+                break;
+            }
+          }
+        });
+
+        hlsRef.current = hls;
+      } else {
+        // Fallback for direct video playback
+        video.src = src;
+        video.load();
+      }
+    } catch (err) {
+      console.error('Error initializing video player:', err);
+      setError('Não foi possível carregar o vídeo. Verifique sua conexão com a internet.');
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Reset states when src changes
+    setError(null);
+    setIsLoading(true);
+    setRetryCount(0);
+    setIsPlaying(false);
+    setIsBuffering(false);
+
+    const handleError = () => {
+      setIsLoading(false);
+      if (retryCount < 3) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(initPlayer, 1000);
+      } else {
+        setError('Não foi possível reproduzir este vídeo. Por favor, tente novamente mais tarde.');
+      }
+    };
+
+    const handleLoadStart = () => {
+      setIsLoading(true);
+      setError(null);
+    };
+
+    const handleCanPlay = () => {
+      setIsLoading(false);
+      if (videoSettings.autoplay) {
+        video.play().catch(() => {
+          setIsPlaying(false);
+          setError('Falha ao iniciar a reprodução automática');
+        });
+      }
+    };
+
+    // Enhanced buffer checking
+    const checkBuffer = () => {
+      if (!video.paused) {
+        const currentPlaybackTime = video.currentTime;
+        
+        if (currentPlaybackTime === lastPlaybackTime.current) {
+          setIsBuffering(true);
+        } else {
+          setIsBuffering(false);
+        }
+        
+        lastPlaybackTime.current = currentPlaybackTime;
+      }
+    };
+
+    bufferCheckInterval.current = window.setInterval(checkBuffer, 1000);
+
+    video.addEventListener('error', handleError);
+    video.addEventListener('loadstart', handleLoadStart);
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('waiting', () => setIsBuffering(true));
+    video.addEventListener('playing', () => {
+      setIsBuffering(false);
+      setIsPlaying(true);
+      setError(null);
+    });
+
+    // Set initial volume from settings
+    video.volume = videoSettings.volume;
+    setVolume(videoSettings.volume);
+
+    // Initialize the player
+    initPlayer();
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
+      video.removeEventListener('error', handleError);
+      video.removeEventListener('loadstart', handleLoadStart);
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('waiting', () => setIsBuffering(true));
+      video.removeEventListener('playing', () => {
+        setIsBuffering(false);
+        setIsPlaying(true);
+      });
+      clearInterval(bufferCheckInterval.current);
+    };
+  }, [src, retryCount, videoSettings.autoplay, videoSettings.volume]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -41,33 +202,26 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     if (!video || !container) return;
 
     const handleFullscreenChange = () => {
-      const isFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isFullscreen);
+      setIsFullscreen(!!document.fullscreenElement);
       setShowControls(true);
-      
-      if (!isFullscreen) {
-        container.style.width = '100%';
-        container.style.height = 'auto';
-        video.style.width = '100%';
-        video.style.height = '100%';
-        clearTimeout(controlsTimeoutRef.current);
-      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
+    // Restore watch progress
     const savedProgress = watchProgress[movieId];
-    if (savedProgress) {
+    if (savedProgress && savedProgress > 0) {
       video.currentTime = savedProgress;
     }
 
-    const interval = setInterval(() => {
+    // Save progress periodically
+    const progressInterval = setInterval(() => {
       if (video.currentTime > 0) {
         updateWatchProgress(movieId, video.currentTime);
-        setCurrentTime(video.currentTime);
       }
     }, 1000);
 
+    // Video event handlers
     const handleTimeUpdate = () => {
       setCurrentTime(video.currentTime);
       setDuration(video.duration);
@@ -79,171 +233,79 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       video.playbackRate = playbackSpeed;
     };
 
-    const handleWaiting = () => setIsLoading(true);
-    const handlePlaying = () => setIsLoading(false);
+    const handleWaiting = () => {
+      setIsLoading(true);
+      setIsBuffering(true);
+    };
+
+    const handlePlaying = () => {
+      setIsLoading(false);
+      setError(null);
+      setIsPlaying(true);
+      setIsBuffering(false);
+    };
+    
+    const handleEnded = () => {
+      setIsPlaying(false);
+      if (onNext) {
+        onNext();
+      }
+    };
 
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('loadeddata', handleLoadedData);
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('playing', handlePlaying);
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      
-      switch (e.key.toLowerCase()) {
-        case ' ':
-          e.preventDefault();
-          togglePlay();
-          break;
-        case 'f':
-          e.preventDefault();
-          toggleFullscreen();
-          break;
-        case 'arrowright':
-          e.preventDefault();
-          video.currentTime += e.shiftKey ? 10 : 5;
-          break;
-        case 'arrowleft':
-          e.preventDefault();
-          video.currentTime -= e.shiftKey ? 10 : 5;
-          break;
-        case 'm':
-          e.preventDefault();
-          toggleMute();
-          break;
-        case 'k':
-          e.preventDefault();
-          togglePlay();
-          break;
-        case 'p':
-          e.preventDefault();
-          togglePictureInPicture();
-          break;
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyPress);
-
-    const handleMouseMove = () => {
-      setShowControls(true);
-      clearTimeout(controlsTimeoutRef.current);
-      if (isPlaying && !showSettings && !showKeyboardShortcuts) {
-        controlsTimeoutRef.current = window.setTimeout(() => {
-          setShowControls(false);
-        }, 3000);
-      }
-    };
-
-    container.addEventListener('mousemove', handleMouseMove);
-    container.addEventListener('mouseenter', () => setShowControls(true));
-    container.addEventListener('mouseleave', () => {
-      if (isPlaying && !showSettings && !showKeyboardShortcuts) {
-        setShowControls(false);
-      }
-    });
-
-    // Handle touch events for mobile
-    let touchStartTime = 0;
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let isSeeking = false;
-    let initialVolume = video.volume;
-
-    const handleTouchStart = (e: TouchEvent) => {
-      touchStartTime = Date.now();
-      touchStartX = e.touches[0].clientX;
-      touchStartY = e.touches[0].clientY;
-      initialVolume = video.volume;
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!isSeeking) return;
-
-      const deltaX = e.touches[0].clientX - touchStartX;
-      const deltaY = e.touches[0].clientY - touchStartY;
-
-      // Horizontal swipe for seeking
-      if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        const seekAmount = (deltaX / container.clientWidth) * video.duration;
-        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekAmount));
-        touchStartX = e.touches[0].clientX;
-      }
-      // Vertical swipe for volume
-      else {
-        const volumeChange = deltaY / container.clientHeight;
-        const newVolume = Math.max(0, Math.min(1, initialVolume - volumeChange));
-        video.volume = newVolume;
-        setVolume(newVolume);
-        setIsMuted(newVolume === 0);
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      const touchDuration = Date.now() - touchStartTime;
-      
-      // Single tap to toggle controls
-      if (touchDuration < 250 && !isSeeking) {
-        setShowControls(!showControls);
-      }
-      
-      isSeeking = false;
-    };
-
-    // Double tap to seek
-    let lastTap = 0;
-    const handleDoubleTap = (e: TouchEvent) => {
-      const currentTime = Date.now();
-      const tapLength = currentTime - lastTap;
-      
-      if (tapLength < 300) {
-        const rect = container.getBoundingClientRect();
-        const x = e.touches[0].clientX - rect.left;
-        
-        if (x < rect.width / 2) {
-          video.currentTime -= 10;
-        } else {
-          video.currentTime += 10;
-        }
-        
-        e.preventDefault();
-      }
-      
-      lastTap = currentTime;
-    };
-
-    container.addEventListener('touchstart', handleTouchStart);
-    container.addEventListener('touchmove', handleTouchMove);
-    container.addEventListener('touchend', handleTouchEnd);
-    container.addEventListener('touchstart', handleDoubleTap);
+    video.addEventListener('ended', handleEnded);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(progressInterval);
+      clearInterval(bufferCheckInterval.current);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('playing', handlePlaying);
-      container.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('keydown', handleKeyPress);
+      video.removeEventListener('ended', handleEnded);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchstart', handleDoubleTap);
-      clearTimeout(controlsTimeoutRef.current);
     };
-  }, [movieId, updateWatchProgress, isPlaying, playbackSpeed, showSettings, showKeyboardShortcuts]);
+  }, [movieId, updateWatchProgress, playbackSpeed, onNext]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const video = videoRef.current;
     if (!video) return;
 
-    if (video.paused) {
-      video.play();
-      setIsPlaying(true);
-    } else {
-      video.pause();
-      setIsPlaying(false);
+    try {
+      if (video.paused) {
+        await video.play();
+        setIsPlaying(true);
+      } else {
+        video.pause();
+        setIsPlaying(false);
+      }
+    } catch (err) {
+      setError('Não foi possível reproduzir o vídeo. Verifique sua conexão com a internet.');
     }
+  };
+
+  const retryPlayback = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    setError(null);
+    setIsLoading(true);
+    setRetryCount(0);
+    setIsBuffering(false);
+    
+    // Reset the video element
+    video.load();
+    
+    // Attempt to play after a short delay
+    setTimeout(() => {
+      video.play().catch(() => {
+        setError('Não foi possível reproduzir o vídeo. Por favor, tente novamente.');
+        setIsLoading(false);
+      });
+    }, 1000);
   };
 
   const toggleMute = () => {
@@ -261,15 +323,11 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     try {
       if (!document.fullscreenElement) {
         await container.requestFullscreen();
-        setIsFullscreen(true);
-        setShowControls(true);
       } else {
         await document.exitFullscreen();
-        setIsFullscreen(false);
-        setShowControls(true);
       }
     } catch (error) {
-      console.error('Error toggling fullscreen:', error);
+      console.error('Erro ao alternar tela cheia:', error);
     }
   };
 
@@ -284,7 +342,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
         await video.requestPictureInPicture();
       }
     } catch (error) {
-      console.error('PiP failed:', error);
+      console.error('Picture-in-Picture falhou:', error);
     }
   };
 
@@ -337,23 +395,47 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
     return <Volume2 size={20} />;
   };
 
+  if (error) {
+    return (
+      <div className="relative aspect-video bg-[#1A1C25] rounded-xl overflow-hidden flex items-center justify-center">
+        <div className="text-center p-6">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-white/90 mb-4">{error}</p>
+          <button
+            onClick={() => {
+              setError(null);
+              setRetryCount(0);
+              initPlayer();
+            }}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 mx-auto"
+          >
+            <RefreshCw size={16} />
+            <span>Tentar Novamente</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
       ref={containerRef}
       className="relative group aspect-video bg-black rounded-xl overflow-hidden"
+      onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => !isLoading && !isBuffering && setShowControls(false)}
     >
-      {isLoading && (
+      {(isLoading || isBuffering) && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
-          <div className="w-12 h-12 border-4 border-accent-500/30 border-t-accent-500 rounded-full animate-spin" />
+          <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
         </div>
       )}
 
       <video
         ref={videoRef}
-        src={src}
         poster={poster}
         className="w-full h-full object-contain"
         playsInline
+        preload="auto"
       />
 
       {/* Click to play/pause overlay */}
@@ -376,12 +458,12 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
             onClick={handleProgressClick}
           >
             <div
-              className="absolute h-full bg-accent-500 rounded-full"
+              className="absolute h-full bg-blue-500 rounded-full"
               style={{ width: `${(currentTime / duration) * 100}%` }}
             />
             <div
-              className="absolute h-4 w-4 bg-accent-500 rounded-full -translate-y-1/2 opacity-0 group-hover/progress:opacity-100 transition-opacity"
-              style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translateX(-50%)' }}
+              className="absolute h-4 w-4 bg-blue-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition-opacity"
+              style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
             />
           </div>
 
@@ -442,7 +524,7 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
                   step="0.05"
                   value={volume}
                   onChange={handleVolumeChange}
-                  className="w-24 h-1 bg-white/30 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent-500"
+                  className="w-24 h-1 bg-white/30 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
                 />
               </div>
             </div>
@@ -465,13 +547,13 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
               {showSettings && (
                 <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 backdrop-blur-sm rounded-lg overflow-hidden">
                   <div className="p-2 border-b border-white/10">
-                    <div className="text-sm font-medium mb-2">Playback Speed</div>
+                    <div className="text-sm font-medium mb-2">Velocidade de Reprodução</div>
                     {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
                       <button
                         key={speed}
                         onClick={() => handlePlaybackSpeedChange(speed)}
                         className={`w-full text-left px-4 py-1.5 text-sm hover:bg-white/10 rounded ${
-                          playbackSpeed === speed ? 'text-accent-500' : ''
+                          playbackSpeed === speed ? 'text-blue-500' : ''
                         }`}
                       >
                         {speed}x
@@ -524,16 +606,16 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-xl font-semibold mb-4">Keyboard Shortcuts</h3>
+            <h3 className="text-xl font-semibold mb-4">Atalhos do Teclado</h3>
             <div className="grid gap-2">
               {[
-                { key: 'Space/K', action: 'Play/Pause' },
-                { key: 'M', action: 'Mute/Unmute' },
-                { key: 'F', action: 'Toggle fullscreen' },
-                { key: '←', action: 'Rewind 5 seconds' },
-                { key: '→', action: 'Forward 5 seconds' },
-                { key: 'Shift + ←', action: 'Rewind 10 seconds' },
-                { key: 'Shift + →', action: 'Forward 10 seconds' },
+                { key: 'Espaço/K', action: 'Reproduzir/Pausar' },
+                { key: 'M', action: 'Mutar/Desmutar' },
+                { key: 'F', action: 'Tela Cheia' },
+                { key: '←', action: 'Retroceder 5 segundos' },
+                { key: '→', action: 'Avançar 5 segundos' },
+                { key: 'Shift + ←', action: 'Retroceder 10 segundos' },
+                { key: 'Shift + →', action: 'Avançar 10 segundos' },
                 { key: 'P', action: 'Picture in Picture' },
               ].map(({ key, action }) => (
                 <div key={key} className="flex items-center justify-between py-2 border-b border-white/10">
@@ -549,10 +631,12 @@ export function VideoPlayer({ src, movieId, poster, onNext }: VideoPlayerProps) 
       {/* Mobile touch gestures hint */}
       <div className="absolute top-4 left-4 right-4 flex items-center justify-center pointer-events-none sm:hidden">
         <div className="bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-center">
-          <p>Double tap sides to seek ±10s</p>
-          <p className="text-xs text-neutral-400">Swipe horizontally to seek, vertically for volume</p>
+          <p>Toque duplo nas laterais para avançar/retroceder ±10s</p>
+          <p className="text-xs text-neutral-400">Deslize horizontalmente para buscar, verticalmente para volume</p>
         </div>
       </div>
     </div>
   );
 }
+
+export { VideoPlayer }
